@@ -1,0 +1,30 @@
+ISOLATED_TAGS = {
+
+    "@umm",
+    "@uhh",
+    "@hmm",
+    "@ugh",
+    "@huh",
+    "@tsk",
+    "@uh-huh",
+    "@ehh",
+
+    "@stutter-block",
+    "@silence",
+    "@unintelligible",
+
+    "@laughter",
+    "@cry",
+    "@hum",
+    "@breathe",
+    "@sniff",
+    "@nose-blowing",
+    "@cough",
+    "@sneeze",
+    "@throat-clearing",
+    "@yawn",
+    "@eating-sounds",
+    "@snore",
+    "@groan",
+    "@sigh",
+}
