@@ -6,6 +6,8 @@
   <!-- Load Wavesurfer and Regions Plugin from unpkg CDN -->
   <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
   <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
+  <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/timeline.min.js"></script>
+  <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/hover.min.js"></script>
   <!-- Load Tribute for textarea autocomplete -->
   <link rel="stylesheet" href="https://unpkg.com/tributejs@5.1.3/dist/tribute.css">
   <script src="https://unpkg.com/tributejs@5.1.3/dist/tribute.min.js"></script>
@@ -190,6 +192,22 @@
 
     .segment-body {
       padding: 12px;
+      display: flex;
+      gap: 15px;
+    }
+
+    .segment-half {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .segment-half-title {
+      font-size: 11px;
+      color: #777;
+      margin-bottom: 5px;
+      text-transform: uppercase;
+      font-weight: 600;
     }
 
     .text-area {
@@ -205,6 +223,12 @@
     
     .text-area:focus {
       border-color: var(--border-color);
+    }
+
+    .text-area.readonly {
+      background: #f5f5f5;
+      color: #555;
+      cursor: not-allowed;
     }
 
     /* Loader */
@@ -250,6 +274,7 @@
       <div class="waveform-container" id="waveform">
         <div id="loading">Loading audio...</div>
       </div>
+      <div id="timeline" style="margin-top: 5px; font-family: monospace; font-size: 11px; color: #666;"></div>
     </div>
 
     <div class="right-pane">
@@ -264,23 +289,24 @@
     let wavesurfer = null;
     let wsRegions = null;
     let currentSegments = [];
+    let originalSegments = [];
     let activeSegmentId = null;
     let audioReady = false;
     let playingRegionEnd = null; // Track if we are playing a specific region
 
     const rsmlTags = [
-        "umm", "uhh", "hmm", "ugh", "huh", "tsk", "uh-huh", "ehh", 
-        "stutter-block", "silence", "unintelligible", "laughter", "cry", 
-        "hum", "breathe", "sniff", "nose-blowing", "cough", "sneeze", 
-        "throat-clearing", "yawn", "eating-sounds", "snore", "groan", "sigh",
-        "filler-start", "filler-end", "repetition-start", "repetition-end", 
-        "broken-word-start", "broken-word-end", "repair-start", "repair-end", 
-        "false-start-start", "false-start-end", "prolongation-start", "prolongation-end",
-        "crying-start", "crying-end", "yelling-start", "yelling-end", 
-        "laughing-start", "laughing-end", "singing-start", "singing-end", 
-        "humming-start", "humming-end", "whistling-start", "whistling-end", 
-        "whispering-start", "whispering-end", "emphasis-start", "emphasis-end", 
-        "falling-pitch-start", "falling-pitch-end", "raising-pitch-start", "raising-pitch-end"
+        "breathe", "broken-word-end", "broken-word-start", "cough", "cry",
+        "crying-end", "crying-start", "eating-sounds", "ehh", "emphasis-end", 
+        "emphasis-start", "falling-pitch-end", "falling-pitch-start", "false-start-end", "false-start-start", 
+        "filler-end", "filler-start", "groan", "hmm", "huh",
+        "hum", "humming-end", "humming-start", "laughing-end", "laughing-start",
+        "laughter", "nose-blowing", "prolongation-end", "prolongation-start", "raising-pitch-end",
+        "raising-pitch-start", "repair-end", "repair-start", "repetition-end", "repetition-start",
+        "sigh", "silence", "singing-end", "singing-start", "sneeze",
+        "sniff", "snore", "stutter-block", "throat-clearing", "tsk",
+        "ugh", "uh-huh", "uhh", "umm", "unintelligible",
+        "whispering-end", "whispering-start", "whistling-end", "whistling-start", "yawn", 
+        "yelling-end", "yelling-start"
     ];
 
     let tribute = new Tribute({
@@ -344,6 +370,23 @@
       });
 
       wsRegions = wavesurfer.registerPlugin(WaveSurfer.Regions.create());
+      
+      wavesurfer.registerPlugin(WaveSurfer.Timeline.create({
+        container: '#timeline',
+        height: 20,
+        timeInterval: 1,
+        primaryLabelInterval: 5,
+        secondaryLabelInterval: 1,
+        formatTimeCallback: (sec) => formatTime(sec)
+      }));
+
+      wavesurfer.registerPlugin(WaveSurfer.Hover.create({
+        lineColor: '#ff0000',
+        lineWidth: 2,
+        labelBackground: '#222',
+        labelColor: '#fff',
+        labelSize: '12px',
+      }));
 
       wavesurfer.on('ready', () => {
         document.getElementById('loading').style.display = 'none';
@@ -443,6 +486,10 @@
         item.id = `seg-${seg.id}`;
         item.onclick = () => activateSegment(seg.id, true);
 
+        // Find original segment text
+        const origSeg = originalSegments.find(s => s.id === seg.id);
+        const origText = origSeg ? origSeg.text : seg.text;
+
         item.innerHTML = `
           <div class="segment-header-bar">
             <div class="segment-id">${index + 1}</div>
@@ -455,7 +502,14 @@
             <input type="text" class="time-input" id="end-${seg.id}" value="${formatTime(seg.end)}" readonly>
           </div>
           <div class="segment-body">
-            <textarea class="text-area" id="text-${seg.id}" onchange="updateData(${seg.id})" onclick="event.stopPropagation()">${seg.text}</textarea>
+            <div class="segment-half">
+              <div class="segment-half-title">Original (DB)</div>
+              <textarea class="text-area readonly" readonly>${origText}</textarea>
+            </div>
+            <div class="segment-half">
+              <div class="segment-half-title">Editable Review</div>
+              <textarea class="text-area" id="text-${seg.id}" onchange="updateData(${seg.id})" onclick="event.stopPropagation()">${seg.text}</textarea>
+            </div>
           </div>
         `;
         listEl.appendChild(item);
@@ -536,6 +590,11 @@
         // If segments passed from python
         if (args.segments && Array.isArray(args.segments)) {
             currentSegments = args.segments;
+            if (args.original_segments && Array.isArray(args.original_segments)) {
+                originalSegments = args.original_segments;
+            } else if (originalSegments.length === 0) {
+                originalSegments = JSON.parse(JSON.stringify(args.segments));
+            }
             if (audioReady) {
                renderSegments();
             }

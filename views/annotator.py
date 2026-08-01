@@ -4,10 +4,7 @@ from utils.logout import logout
 from utils.logger import logger
 
 from components.annotator.wavesurfer_editor import render as wavesurfer_editor
-from components.annotator.metadata_panel import render as metadata_panel
 from components.annotator.navigation import render as navigation
-from components.annotator.normalized_view import render as normalized_view
-from components.annotator.validation_panel import render as validation_panel
 from components.annotator.tag_reference import render as tag_reference
 from components.annotator.footer import render as footer
 from components.annotator.task_queue import render as task_queue
@@ -146,43 +143,6 @@ def show():
 
     st.divider()
 
-    left, right = st.columns([3, 2])
-
-    with left:
-        metadata_panel(task)
-        st.divider()
-
-    # The transcript state is managed differently now (saved via wavesurfer as JSON)
-    # But for validation we need plain text. We can extract it from the JSON.
-    try:
-        import json
-        import re
-        segs = json.loads(annotation.transcript) if annotation.transcript else []
-        transcript = ""
-        for i, seg in enumerate(segs):
-            speaker_str = seg.get('speaker', '')
-            text = seg.get('text', '')
-            
-            # Extract number from speaker string like "Speaker 0 (Female)"
-            match = re.search(r'\d+', speaker_str)
-            if match:
-                speaker_idx = int(match.group()) + 1
-            else:
-                speaker_idx = 1
-                
-            transcript += f"&s{speaker_idx}-start {text} &s{speaker_idx}-end\n\n"
-    except Exception as e:
-        logger.error(f"Failed to parse segments: {e}")
-        transcript = annotation.transcript or ""
-
-    # Process the transcript through the RSML pipeline
-    result = process_transcript(transcript)
-    messages = result["messages"]
-
-    with right:
-        normalized_view(result["ast"])
-        validation_panel(messages)
-
     st.divider()
 
     tag_reference()
@@ -190,10 +150,9 @@ def show():
     st.divider()
 
     # Version History (annotators can also restore)
-    # Version History (annotators can also restore)
     restored = history_panel(
         annotation_id=annotation.id,
-        current_text=transcript,
+        current_text=annotation.transcript or "",
         allow_restore=(not is_read_only),
     )
     if restored is not None:
@@ -210,10 +169,8 @@ def show():
     if is_read_only:
         st.info("🔒 This annotation has been submitted for review and is currently locked. It is read-only unless returned by a reviewer.", icon="🔒")
     else:
-        has_errors = any(
-            message.level == "ERROR"
-            for message in messages
-        )
+        # Since validation panel is removed, we default has_errors to False.
+        has_errors = False
 
         save, abandon_task, submit = footer(has_errors)
 
@@ -221,7 +178,7 @@ def show():
 
             ok = save_annotation(
                 annotation.id,
-                transcript,
+                annotation.transcript or "",
                 annotation.rsml_content or "",
             )
 

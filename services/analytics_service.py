@@ -68,7 +68,8 @@ def get_kpi_summary() -> Dict[str, Any]:
             .filter(Annotation.state == AnnotationState.APPROVED)
             .scalar() or 0.0
         )
-        approved_pct = (approved_duration / total_duration * 100) if total_duration > 0 else 0.0
+        total_reviews = approved_count + returned_count
+        approved_pct = (approved_count / total_reviews * 100) if total_reviews > 0 else 0.0
 
         return {
             "total_users":       total_users,
