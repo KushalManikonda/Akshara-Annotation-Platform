@@ -231,6 +231,67 @@
       cursor: not-allowed;
     }
 
+    .rich-preview {
+      width: 100%;
+      height: 80px;
+      padding: 8px;
+      overflow-y: auto;
+      background: #fdfdfd;
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      font-size: 14px;
+      box-sizing: border-box;
+      line-height: 1.8;
+      cursor: default;
+    }
+    
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 0 6px;
+      border-radius: 4px;
+      margin: 0 3px;
+      font-size: 12px;
+      font-weight: 500;
+      border: 1px solid;
+      cursor: help;
+    }
+    .chip-hesitation { background: #fff8e1; border-color: #ffe082; color: #f57f17; }
+    .chip-paralinguistic { background: #e8f5e9; border-color: #a5d6a7; color: #2e7d32; }
+    .chip-other { background: #e3f2fd; border-color: #90caf9; color: #1565c0; }
+    .chip-speaker { background: #ede7f6; border-color: #d1c4e9; color: #4527a0; }
+    .chip-bracket { background: #e0f7fa; border-color: #80deea; color: #00838f; }
+    .chip-language { background: #fce4ec; border-color: #f48fb1; color: #c2185b; }
+    .chip-icon { margin-right: 4px; font-size: 10px; }
+    
+    .chip-error {
+      background: #ffebee;
+      border-color: #ffcdd2;
+      color: #d32f2f;
+      border-style: dashed;
+    }
+    
+    .speaker-label {
+      font-size: 10px;
+      color: #7e57c2;
+      font-weight: bold;
+      margin-top: 8px;
+      margin-bottom: 4px;
+      border: 1px solid #d1c4e9;
+      display: block;
+      width: fit-content;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: #f3e5f5;
+    }
+    
+    .error-box {
+      color: #d32f2f;
+      font-size: 12px;
+      margin-top: 5px;
+      display: none;
+    }
+
     /* Loader */
     #loading {
       position: absolute;
@@ -289,7 +350,6 @@
     let wavesurfer = null;
     let wsRegions = null;
     let currentSegments = [];
-    let originalSegments = [];
     let activeSegmentId = null;
     let audioReady = false;
     let playingRegionEnd = null; // Track if we are playing a specific region
@@ -470,12 +530,25 @@
       listEl.innerHTML = '';
 
       currentSegments.forEach((seg, index) => {
+        // Add text label to region
+        const contentEl = document.createElement('div');
+        contentEl.textContent = seg.text;
+        contentEl.id = `region-text-${seg.id}`;
+        contentEl.style.padding = '2px 4px';
+        contentEl.style.fontSize = '10px';
+        contentEl.style.color = '#333';
+        contentEl.style.whiteSpace = 'nowrap';
+        contentEl.style.overflow = 'hidden';
+        contentEl.style.textOverflow = 'ellipsis';
+        contentEl.style.pointerEvents = 'none'; // so it doesn't block dragging
+
         // Add region to waveform
         wsRegions.addRegion({
           id: seg.id,
           start: seg.start,
           end: seg.end,
           color: 'rgba(91, 70, 176, 0.2)',
+          content: contentEl,
           drag: true,
           resize: true
         });
@@ -486,9 +559,6 @@
         item.id = `seg-${seg.id}`;
         item.onclick = () => activateSegment(seg.id, true);
 
-        // Find original segment text
-        const origSeg = originalSegments.find(s => s.id === seg.id);
-        const origText = origSeg ? origSeg.text : seg.text;
 
         item.innerHTML = `
           <div class="segment-header-bar">
@@ -503,12 +573,13 @@
           </div>
           <div class="segment-body">
             <div class="segment-half">
-              <div class="segment-half-title">Original (DB)</div>
-              <textarea class="text-area readonly" readonly>${origText}</textarea>
+              <div class="segment-half-title">Editable ASR Transcript</div>
+              <textarea class="text-area" id="text-${seg.id}" onchange="updateData(${seg.id})" oninput="updateNormalizedPreview(${seg.id})" onclick="event.stopPropagation()">${seg.text}</textarea>
+              <div id="error-${seg.id}" class="error-box"></div>
             </div>
             <div class="segment-half">
-              <div class="segment-half-title">Editable Review</div>
-              <textarea class="text-area" id="text-${seg.id}" onchange="updateData(${seg.id})" onclick="event.stopPropagation()">${seg.text}</textarea>
+              <div class="segment-half-title">Normalized Preview</div>
+              <div class="rich-preview" id="rich-preview-${seg.id}"></div>
             </div>
           </div>
         `;
@@ -517,6 +588,9 @@
 
       // Attach Tribute to all new textareas
       tribute.attach(document.querySelectorAll('.text-area'));
+      
+      // Initialize preview and validation for all segments
+      currentSegments.forEach(seg => updateNormalizedPreview(seg.id));
     }
     
     function updateSegmentUI(id) {
@@ -555,7 +629,148 @@
       if (seg) {
         seg.speaker = document.getElementById(`speaker-${id}`).value;
         seg.text = document.getElementById(`text-${id}`).value;
+        sendSaveEvent();
       }
+    }
+
+    function getTagCategory(tag) {
+        const hesitations = ['umm','uhh','hmm','ugh','huh','tsk','uh-huh','ehh'];
+        const paralinguistics = ['laughter','cry','hum','breathe','sniff','nose-blowing','cough','sneeze','throat-clearing','yawn','eating-sounds','snore','groan','sigh'];
+        const otherIsolated = ['silence','unintelligible','stutter-block'];
+        
+        if (hesitations.includes(tag)) return { cat: 'Hesitation', cls: 'chip-hesitation' };
+        if (paralinguistics.includes(tag)) return { cat: 'Paralinguistic', cls: 'chip-paralinguistic' };
+        if (otherIsolated.includes(tag)) return { cat: 'Other', cls: 'chip-other' };
+        if (tag.includes('start') || tag.includes('end')) {
+            if (tag.startsWith('s')) return { cat: 'Speaker Turn', cls: 'chip-speaker' };
+            return { cat: 'Span Tag', cls: 'chip-paralinguistic' };
+        }
+        return { cat: 'Unknown Tag', cls: 'chip-other' };
+    }
+
+    function processRSML(text) {
+        let errors = [];
+        const tagRegex = /([&@][a-zA-Z0-9_-]+-(?:start|end)|@[a-zA-Z0-9_-]+|#[a-zA-Z0-9_-]+(?::[a-zA-Z0-9_-]+)?\[.*?\]\(.*?\)|![a-zA-Z0-9_-]+\[.*?\]\(.*?\))/g;
+        
+        let tokens = [];
+        let lastIndex = 0;
+        let match;
+        
+        while ((match = tagRegex.exec(text)) !== null) {
+            if (match.index > lastIndex) {
+                tokens.push({ type: 'text', value: text.substring(lastIndex, match.index) });
+            }
+            tokens.push({ type: 'tag', value: match[0] });
+            lastIndex = tagRegex.lastIndex;
+        }
+        if (lastIndex < text.length) {
+            tokens.push({ type: 'text', value: text.substring(lastIndex) });
+        }
+        
+        let openStack = [];
+        let errorTokens = new Set();
+        
+        for (let i = 0; i < tokens.length; i++) {
+            let t = tokens[i];
+            if (t.type === 'tag') {
+                if (t.value.endsWith('-start')) {
+                    let base = t.value.substring(1, t.value.length - 6);
+                    openStack.push({ base: base, index: i, value: t.value });
+                } else if (t.value.endsWith('-end')) {
+                    let base = t.value.substring(1, t.value.length - 4);
+                    if (openStack.length > 0 && openStack[openStack.length - 1].base === base) {
+                        openStack.pop();
+                    } else {
+                        errorTokens.add(i);
+                        errors.push(`Unmatched ${t.value}`);
+                    }
+                }
+            }
+        }
+        
+        openStack.forEach(st => {
+            errorTokens.add(st.index);
+            errors.push(`Unmatched ${st.value}`);
+        });
+        
+        let html = "";
+        
+        for (let i = 0; i < tokens.length; i++) {
+            let t = tokens[i];
+            if (t.type === 'text') {
+                html += t.value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            } else {
+                let val = t.value;
+                let isError = errorTokens.has(i);
+                
+                if (isError) {
+                    html += `<span class="chip chip-error" title="Syntax Error"><i class="fas fa-exclamation-triangle chip-icon"></i>${val.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</span>`;
+                    continue;
+                }
+                
+                if (val.startsWith('&s') && val.endsWith('-start')) {
+                    let speakerNum = val.substring(2, val.indexOf('-start'));
+                    html += `<div class="speaker-label">SPEAKER ${speakerNum}:</div>`;
+                    continue;
+                }
+                if (val.startsWith('&s') && val.endsWith('-end')) {
+                    continue;
+                }
+                
+                if (val.startsWith('#')) {
+                    let m = val.match(/#([a-zA-Z0-9_-]+)(?::[a-zA-Z0-9_-]+)?\[.*?\]\((.*?)\)/);
+                    if (m) {
+                        html += `<span class="chip chip-bracket" title="Entity: ${m[1]}"><i class="fas fa-location-arrow chip-icon"></i>${m[2]}</span>`;
+                    } else {
+                        html += val;
+                    }
+                } else if (val.startsWith('!')) {
+                    let m = val.match(/!([a-zA-Z0-9_-]+)\[.*?\]\((.*?)\)/);
+                    if (m) {
+                        html += `<span class="chip chip-language" title="Language: ${m[1]}"><i class="fas fa-language chip-icon"></i>${m[2]}</span>`;
+                    } else {
+                        html += val;
+                    }
+                } else if (val.endsWith('-start') || val.endsWith('-end')) {
+                    const cleanTag = val.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+                    const catInfo = getTagCategory(val.replace(/-(start|end)$/, '').substring(1));
+                    html += `<span class="chip ${catInfo.cls}" title="${catInfo.cat}">${cleanTag}</span>`;
+                } else if (val.startsWith('@')) {
+                    const catInfo = getTagCategory(val.substring(1));
+                    html += `<span class="chip ${catInfo.cls}" title="${catInfo.cat}">${val}</span>`;
+                } else {
+                    html += val;
+                }
+            }
+        }
+        
+        return { html, errors };
+    }
+
+    function updateNormalizedPreview(id) {
+        const textEl = document.getElementById(`text-${id}`);
+        const previewEl = document.getElementById(`rich-preview-${id}`);
+        const errorEl = document.getElementById(`error-${id}`);
+        
+        if (textEl && previewEl) {
+            const result = processRSML(textEl.value);
+            previewEl.innerHTML = result.html;
+            
+            if (errorEl) {
+                if (result.errors.length > 0) {
+                    errorEl.style.display = 'block';
+                    errorEl.innerHTML = `<i class="fas fa-times" style="margin-right:4px;"></i>${result.errors.length} error(s): ${result.errors.join(', ')}`;
+                } else {
+                    errorEl.style.display = 'none';
+                    errorEl.innerHTML = '';
+                }
+            }
+            
+            const labelEl = document.getElementById(`region-text-${id}`);
+            if (labelEl) {
+                labelEl.textContent = textEl.value;
+            }
+        }
     }
 
     function sendSaveEvent() {
@@ -590,11 +805,6 @@
         // If segments passed from python
         if (args.segments && Array.isArray(args.segments)) {
             currentSegments = args.segments;
-            if (args.original_segments && Array.isArray(args.original_segments)) {
-                originalSegments = args.original_segments;
-            } else if (originalSegments.length === 0) {
-                originalSegments = JSON.parse(JSON.stringify(args.segments));
-            }
             if (audioReady) {
                renderSegments();
             }
