@@ -126,6 +126,43 @@ def show():
             st.session_state.selected_task = None
             st.rerun()
 
+    if is_read_only:
+        st.info("🔒 This annotation has been submitted for review and is currently locked. It is read-only unless returned by a reviewer.", icon="🔒")
+    else:
+        has_errors = False
+        save, abandon_task, submit = footer(has_errors)
+
+        if save:
+            ok = save_annotation(
+                annotation.id,
+                annotation.transcript or "",
+                annotation.rsml_content or "",
+            )
+            if ok:
+                st.success("Draft saved.")
+                logger.info(f"Draft saved for annotation {annotation.id}")
+            else:
+                st.error("Failed to save draft. Please try again.")
+
+        if abandon_task:
+            from services.task_service import release_task
+            if release_task(task.id, user.id):
+                st.success("Task released back to the queue.")
+                st.session_state.selected_task = None
+                st.rerun()
+            else:
+                st.error("Failed to release task.")
+
+        if submit:
+            ok = submit_annotation(annotation.id)
+            if ok:
+                st.success("Annotation submitted successfully.")
+                logger.info(f"Annotation {annotation.id} submitted by {user.id}")
+                st.session_state.selected_task = None
+                st.rerun()
+            else:
+                st.error("Submission failed. Please try again.")
+
     ws_result = wavesurfer_editor(task, annotation, is_read_only)
 
     if ws_result and isinstance(ws_result, dict):
@@ -140,6 +177,10 @@ def show():
                 st.rerun()
             else:
                 st.toast("No more tasks in that direction.", icon="ℹ️")
+
+    st.divider()
+
+    st.divider()
 
     st.divider()
 
@@ -164,47 +205,4 @@ def show():
         else:
             st.error("Failed to restore version.")
 
-    st.divider()
-
-    if is_read_only:
-        st.info("🔒 This annotation has been submitted for review and is currently locked. It is read-only unless returned by a reviewer.", icon="🔒")
-    else:
-        # Since validation panel is removed, we default has_errors to False.
-        has_errors = False
-
-        save, abandon_task, submit = footer(has_errors)
-
-        if save:
-
-            ok = save_annotation(
-                annotation.id,
-                annotation.transcript or "",
-                annotation.rsml_content or "",
-            )
-
-            if ok:
-                st.success("Draft saved.")
-                logger.info(f"Draft saved for annotation {annotation.id}")
-            else:
-                st.error("Failed to save draft. Please try again.")
-
-        if abandon_task:
-            from services.task_service import release_task
-            if release_task(task.id, user.id):
-                st.success("Task released back to the queue.")
-                st.session_state.selected_task = None
-                st.rerun()
-            else:
-                st.error("Failed to release task.")
-
-        if submit:
-
-            ok = submit_annotation(annotation.id)
-
-            if ok:
-                st.success("Annotation submitted successfully.")
-                logger.info(f"Annotation {annotation.id} submitted by {user.id}")
-                st.session_state.selected_task = None
-                st.rerun()
-            else:
-                st.error("Submission failed. Please try again.")
+    # Removed footer from here as it's now placed above

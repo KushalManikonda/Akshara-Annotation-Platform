@@ -23,7 +23,7 @@ def render(task, annotation, is_read_only=False):
     # We need to serve the audio file to the JS component. 
     # Because it's a local file and we can't easily serve it directly in this Streamlit setup,
     # we convert it to a base64 data URI (assuming it's reasonably sized for testing).
-    audio_path = task.file_path
+    audio_path = task.file_path.replace('\\', '/')
     
     if os.path.exists(audio_path):
         with open(audio_path, "rb") as f:

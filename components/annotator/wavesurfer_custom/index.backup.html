@@ -491,8 +491,6 @@
       <div class="player-header">
         <h3 id="taskTitle" style="margin:0; color: #444; font-weight: 500;">Task #</h3>
         <div style="display:flex; gap: 10px;">
-          <button class="dropbtn" onclick="revertAction()"><i class="fas fa-undo-alt"></i> Revert</button>
-          <button class="dropbtn" onclick="sendSaveEvent()"><i class="fas fa-save"></i> Save Changes</button>
           <button class="dropbtn" onclick="addSegmentBtn()"><i class="fas fa-plus"></i> Add Segment</button>
           <div class="dropdown">
             <button class="dropbtn"><i class="fas fa-keyboard"></i> Shortcuts</button>
@@ -501,9 +499,6 @@
               <p><span>-10s / +10s</span> <kbd>&larr;</kbd> / <kbd>&rarr;</kbd></p>
               <p><span>Prev Task</span> <kbd>Shift</kbd> + <kbd>&larr;</kbd></p>
               <p><span>Next Task</span> <kbd>Shift</kbd> + <kbd>&rarr;</kbd></p>
-              <p><span>Undo</span> <kbd>Ctrl</kbd> + <kbd>Z</kbd></p>
-              <p><span>Redo</span> <kbd>Ctrl</kbd> + <kbd>Y</kbd></p>
-              <p><span>Duplicate Segment</span> <kbd>Ctrl</kbd> + <kbd>D</kbd></p>
             </div>
           </div>
         </div>
@@ -559,59 +554,31 @@
     // Undo / Redo state
     let undoStack = [];
     let redoStack = [];
-    let initialSegments = [];
+
+    function cloneSegments(segs) {
+       return JSON.parse(JSON.stringify(segs));
+    }
 
     function pushState() {
-       syncTextFromDOM(); // always capture latest textarea content first
-       undoStack.push(JSON.parse(JSON.stringify(currentSegments)));
+       undoStack.push(cloneSegments(currentSegments));
        if (undoStack.length > 50) undoStack.shift();
        redoStack = []; 
     }
 
-    // Captures any typed-but-not-yet-saved text from textareas into currentSegments
-    function syncTextFromDOM() {
-       currentSegments.forEach(seg => {
-           const ta = document.getElementById(`text-${seg.id}`);
-           if (ta) seg.text = ta.value;
-           const sp = document.getElementById(`speaker-${seg.id}`);
-           if (sp) seg.speaker = sp.value;
-       });
-    }
-
-    function rebuildUI(segs) {
-       currentSegments = JSON.parse(JSON.stringify(segs));
-       renderSegments(); // use the full unified renderer
-    }
-
     function undoAction() {
-       if (undoStack.length === 0) { showToast("Nothing to undo"); return; }
-       syncTextFromDOM();
-       redoStack.push(JSON.parse(JSON.stringify(currentSegments)));
-       let prevState = undoStack.pop();
-       rebuildUI(prevState);
+       if (undoStack.length === 0) return;
+       redoStack.push(cloneSegments(currentSegments));
+       currentSegments = undoStack.pop();
+       renderSegments();
        sendSaveEvent();
-       showToast("Undo");
     }
 
     function redoAction() {
-       if (redoStack.length === 0) { showToast("Nothing to redo"); return; }
-       syncTextFromDOM();
-       undoStack.push(JSON.parse(JSON.stringify(currentSegments)));
-       let nextState = redoStack.pop();
-       rebuildUI(nextState);
+       if (redoStack.length === 0) return;
+       undoStack.push(cloneSegments(currentSegments));
+       currentSegments = redoStack.pop();
+       renderSegments();
        sendSaveEvent();
-       showToast("Redo");
-    }
-
-    function revertAction() {
-       if (initialSegments.length > 0) {
-           pushState();
-           rebuildUI(initialSegments);
-           sendSaveEvent();
-           showToast("Reverted to initial state");
-       } else {
-           showToast("No initial state to revert to");
-       }
     }
 
     const rsmlTags = [
@@ -790,41 +757,42 @@
       wsRegions.on('region-update-end', (region) => {
          const segIndex = currentSegments.findIndex(s => s.id == region.id);
          if (segIndex > -1) {
-             // Push OLD state BEFORE applying new positions
-             pushState();
-             currentSegments[segIndex].start = region.start;
-             currentSegments[segIndex].end = region.end;
+             let tempSegments = cloneSegments(currentSegments);
+             tempSegments[segIndex].start = region.start;
+             tempSegments[segIndex].end = region.end;
              
-             let validation = validateSegments(currentSegments);
-             if (!validation.valid) {
-                 // Revert data and region visually
-                 let prev = undoStack.pop();
-                 currentSegments = prev;
+             let validation = validateSegments(tempSegments);
+             if (validation.valid) {
+                 pushState();
+                 currentSegments = tempSegments;
+                 sendSaveEvent();
+             } else {
+                 // revert region visually
                  region.setOptions({ start: currentSegments[segIndex].start, end: currentSegments[segIndex].end });
-                 updateSegmentUI(region.id);
+                 updateSegmentUI(region.id); // restore inputs
                  showToast(validation.msg);
              }
          } else {
-             // New region drawn on empty waveform area
+             // It's a new region created by dragging on waveform
+             pushState();
              let newSeg = {
                  id: region.id,
                  start: region.start,
                  end: region.end,
                  speaker: "Speaker 0 (Female)",
-                 text: "",
-                 completed: false
+                 text: ""
              };
-             let tempSegments = JSON.parse(JSON.stringify(currentSegments));
+             let tempSegments = cloneSegments(currentSegments);
              tempSegments.push(newSeg);
              let validation = validateSegments(tempSegments);
              if (validation.valid) {
-                 pushState();
                  currentSegments = tempSegments;
                  currentSegments.sort((a,b) => a.start - b.start);
-                 renderSingleSegment(newSeg);
-                 renumberSegments();
+                 renderSegments();
+                 sendSaveEvent();
              } else {
                  region.remove();
+                 undoStack.pop();
                  showToast(validation.msg);
              }
          }
@@ -969,15 +937,14 @@
         
         let segIndex = currentSegments.findIndex(s => s.id == id);
         if (segIndex > -1) {
-            let tempSegments = JSON.parse(JSON.stringify(currentSegments));
+            let tempSegments = cloneSegments(currentSegments);
             tempSegments[segIndex][field] = seconds;
             let validation = validateSegments(tempSegments);
             if (validation.valid) {
                 pushState();
                 currentSegments = tempSegments;
                 currentSegments.sort((a,b) => a.start - b.start);
-                // We should reorder the UI cleanly
-                renumberSegments();
+                renderSegments();
                 sendSaveEvent();
             } else {
                 // revert visually in input
@@ -988,60 +955,45 @@
     }
     
     function splitSegment(id) {
+        pushState();
         const segIndex = currentSegments.findIndex(s => s.id == id);
         if (segIndex === -1) return;
         const seg = currentSegments[segIndex];
         const time = wavesurfer.getCurrentTime();
         
         if (time > seg.start && time < seg.end) {
-            pushState();
             const oldEnd = seg.end;
             seg.end = time;
-            
-            // update existing region visually
-            const region = wsRegions.getRegions().find(r => r.id == id);
-            if (region) region.setOptions({ end: time });
-            updateSegmentUI(id);
-            
             const newSeg = {
                 id: Date.now().toString(),
                 start: time,
                 end: oldEnd,
                 speaker: seg.speaker,
-                text: seg.text, // Duplicate transcript optionally
-                completed: false
+                text: seg.text // Duplicate transcript optionally
             };
             currentSegments.splice(segIndex + 1, 0, newSeg);
-            renderSingleSegment(newSeg);
-            renumberSegments();
+            renderSegments();
             sendSaveEvent();
         } else {
+            undoStack.pop();
             showToast("Playback cursor must be inside the segment to split it.");
         }
     }
     
     function deleteSegment(id) {
+        pushState();
         const segIndex = currentSegments.findIndex(s => s.id == id);
         if (segIndex > -1) {
-            pushState();
             currentSegments.splice(segIndex, 1);
             if (activeSegmentId == id) activeSegmentId = null;
-            
-            // native region removal
-            const region = wsRegions.getRegions().find(r => r.id == id);
-            if (region) region.remove();
-            
-            // dom element removal
-            const el = document.getElementById(`seg-${id}`);
-            if (el) el.remove();
-            
-            renumberSegments();
+            renderSegments();
             sendSaveEvent();
         }
     }
     
     function addSegmentBtn() {
         if (!wavesurfer) return;
+        pushState();
         const time = wavesurfer.getCurrentTime();
         const duration = wavesurfer.getDuration();
         let newEnd = time + 2.0;
@@ -1052,100 +1004,22 @@
             start: time,
             end: newEnd,
             speaker: "Speaker 0 (Female)",
-            text: "",
-            completed: false
+            text: ""
         };
         
-        let tempSegments = JSON.parse(JSON.stringify(currentSegments));
+        let tempSegments = cloneSegments(currentSegments);
         tempSegments.push(newSeg);
         let validation = validateSegments(tempSegments);
         
         if (validation.valid) {
-            pushState();
             currentSegments = tempSegments;
             currentSegments.sort((a,b) => a.start - b.start);
-            renderSingleSegment(newSeg);
-            renumberSegments();
+            renderSegments();
             sendSaveEvent();
         } else {
+            undoStack.pop();
             showToast("Cannot add segment here: " + validation.msg);
         }
-    }
-
-    function renumberSegments() {
-        const listEl = document.getElementById('segmentsList');
-        if (!listEl) return;
-        const items = Array.from(listEl.children);
-        
-        // Ensure DOM order matches start time
-        items.sort((a,b) => {
-            let aStart = parseFloat(a.querySelector('[id^="start-"]').value.split(':').reduce((acc,time) => (60 * acc) + +time));
-            let bStart = parseFloat(b.querySelector('[id^="start-"]').value.split(':').reduce((acc,time) => (60 * acc) + +time));
-            return aStart - bStart;
-        });
-        
-        items.forEach((item, index) => {
-            listEl.appendChild(item); // reorder
-            const idDiv = item.querySelector('.segment-id');
-            if (idDiv) idDiv.textContent = index + 1;
-        });
-    }
-
-    function renderSingleSegment(seg) {
-        const listEl = document.getElementById('segmentsList');
-        if (!listEl) return;
-        
-        // Add region to waveform natively
-        if (wavesurfer && !wsRegions.getRegions().find(r => r.id == seg.id)) {
-            wsRegions.addRegion({
-                id: seg.id.toString(),
-                start: seg.start,
-                end: seg.end,
-                color: (activeSegmentId == seg.id) ? 'rgba(91, 70, 176, 0.6)' : 'rgba(91, 70, 176, 0.2)',
-                drag: true,
-                resize: true
-            });
-        }
-        
-        const item = document.createElement('div');
-        item.className = `segment-item ${seg.completed ? 'segment-completed' : ''}`;
-        item.id = `seg-${seg.id}`;
-        item.onclick = () => activateSegment(seg.id, true);
-        
-        item.innerHTML = `
-          <div class="segment-header-bar">
-            <div class="segment-id"></div>
-            <input type="text" class="time-input" id="start-${seg.id}" value="${formatTime(seg.start)}" onchange="updateTimestamp('${seg.id}', 'start')" title="Edit Start Time">
-            <select class="speaker-select" id="speaker-${seg.id}" onchange="updateData('${seg.id}')">
-              <option value="Speaker 0 (Female)" ${seg.speaker === 'Speaker 0 (Female)' ? 'selected' : ''}>Speaker 0 (Female)</option>
-              <option value="Speaker 1 (Male)" ${seg.speaker === 'Speaker 1 (Male)' ? 'selected' : ''}>Speaker 1 (Male)</option>
-              <option value="Speaker 2 (Female)" ${seg.speaker === 'Speaker 2 (Female)' ? 'selected' : ''}>Speaker 2 (Female)</option>
-            </select>
-            <input type="text" class="time-input" id="end-${seg.id}" value="${formatTime(seg.end)}" onchange="updateTimestamp('${seg.id}', 'end')" title="Edit End Time">
-            <button class="action-btn" onclick="splitSegment('${seg.id}'); event.stopPropagation();" title="Split at Cursor"><i class="fas fa-cut"></i></button>
-            <button class="action-btn delete-btn" onclick="deleteSegment('${seg.id}'); event.stopPropagation();" title="Delete Segment"><i class="fas fa-trash"></i></button>
-          </div>
-          <div class="segment-body">
-            <div class="segment-half">
-              <div class="segment-half-title" style="display: flex; justify-content: space-between; align-items: center;">
-                <span>Editable ASR Transcript</span>
-                <label style="cursor: pointer; display: flex; align-items: center; gap: 4px; font-weight: normal; color: #555;">
-                  <input type="checkbox" id="completed-${seg.id}" ${seg.completed ? 'checked' : ''} onchange="toggleCompleted('${seg.id}')" onclick="event.stopPropagation()">
-                  Done
-                </label>
-              </div>
-              <textarea class="text-area" id="text-${seg.id}" ${seg.completed ? 'disabled' : ''} onchange="updateData('${seg.id}')" oninput="updateNormalizedPreview('${seg.id}')" onclick="event.stopPropagation()">${seg.text}</textarea>
-              <div id="error-${seg.id}" class="error-box"></div>
-            </div>
-            <div class="segment-half">
-              <div class="segment-half-title">Normalized Preview</div>
-              <div class="rich-preview" id="rich-preview-${seg.id}"></div>
-            </div>
-          </div>
-        `;
-        listEl.appendChild(item);
-        if (typeof tribute !== 'undefined') tribute.attach(item.querySelectorAll('.text-area'));
-        updateNormalizedPreview(seg.id);
     }
 
     function renderSegments() {
@@ -1179,7 +1053,7 @@
 
         // Add to list
         const item = document.createElement('div');
-        item.className = `segment-item ${seg.completed ? 'segment-completed' : ''}`;
+        item.className = 'segment-item';
         item.id = `seg-${seg.id}`;
         item.onclick = () => activateSegment(seg.id, true);
 
@@ -1199,14 +1073,8 @@
           </div>
           <div class="segment-body">
             <div class="segment-half">
-              <div class="segment-half-title" style="display: flex; justify-content: space-between; align-items: center;">
-                <span>Editable ASR Transcript</span>
-                <label style="cursor: pointer; display: flex; align-items: center; gap: 4px; font-weight: normal; color: #555;">
-                  <input type="checkbox" id="completed-${seg.id}" ${seg.completed ? 'checked' : ''} onchange="toggleCompleted('${seg.id}')" onclick="event.stopPropagation()">
-                  Done
-                </label>
-              </div>
-              <textarea class="text-area" id="text-${seg.id}" ${seg.completed ? 'disabled' : ''} onchange="updateData('${seg.id}')" oninput="updateNormalizedPreview('${seg.id}')" onclick="event.stopPropagation()">${seg.text}</textarea>
+              <div class="segment-half-title">Editable ASR Transcript</div>
+              <textarea class="text-area" id="text-${seg.id}" onchange="updateData('${seg.id}')" oninput="updateNormalizedPreview('${seg.id}')" onclick="event.stopPropagation()">${seg.text}</textarea>
               <div id="error-${seg.id}" class="error-box"></div>
             </div>
             <div class="segment-half">
@@ -1288,6 +1156,7 @@
 
       if (e.ctrlKey && e.code === 'KeyD') {
           if (activeSegmentId) {
+              pushState();
               let seg = currentSegments.find(s => s.id == activeSegmentId);
               if (seg) {
                   let duration = seg.end - seg.start;
@@ -1296,21 +1165,19 @@
                       start: seg.end,
                       end: seg.end + duration,
                       speaker: seg.speaker,
-                      text: seg.text,
-                      completed: false
+                      text: seg.text
                   };
                   if (wavesurfer && newSeg.end > wavesurfer.getDuration()) newSeg.end = wavesurfer.getDuration();
-                  let tempSegments = JSON.parse(JSON.stringify(currentSegments));
+                  let tempSegments = cloneSegments(currentSegments);
                   tempSegments.push(newSeg);
                   let v = validateSegments(tempSegments);
                   if (v.valid) {
-                      pushState();
                       currentSegments = tempSegments;
                       currentSegments.sort((a,b) => a.start - b.start);
-                      renderSingleSegment(newSeg);
-                      renumberSegments();
+                      renderSegments();
                       sendSaveEvent();
                   } else {
+                      undoStack.pop();
                       showToast("Cannot duplicate: " + v.msg);
                   }
               }
@@ -1335,7 +1202,7 @@
           if (activeSegmentId) {
               let idx = currentSegments.findIndex(s => s.id == activeSegmentId);
               if (idx > -1) {
-                  let tempSegments = JSON.parse(JSON.stringify(currentSegments));
+                  let tempSegments = cloneSegments(currentSegments);
                   if (e.shiftKey) {
                       tempSegments[idx].end -= 0.1; // resize edge
                   } else {
@@ -1346,9 +1213,7 @@
                   if (v.valid) {
                       pushState();
                       currentSegments = tempSegments;
-                      let region = wsRegions.getRegions().find(r => r.id == activeSegmentId);
-                      if (region) region.setOptions({ start: currentSegments[idx].start, end: currentSegments[idx].end });
-                      updateSegmentUI(activeSegmentId);
+                      renderSegments();
                       sendSaveEvent();
                   }
               }
@@ -1360,7 +1225,7 @@
           if (activeSegmentId) {
               let idx = currentSegments.findIndex(s => s.id == activeSegmentId);
               if (idx > -1) {
-                  let tempSegments = JSON.parse(JSON.stringify(currentSegments));
+                  let tempSegments = cloneSegments(currentSegments);
                   if (e.shiftKey) {
                       tempSegments[idx].end += 0.1; // resize edge
                   } else {
@@ -1371,9 +1236,7 @@
                   if (v.valid) {
                       pushState();
                       currentSegments = tempSegments;
-                      let region = wsRegions.getRegions().find(r => r.id == activeSegmentId);
-                      if (region) region.setOptions({ start: currentSegments[idx].start, end: currentSegments[idx].end });
-                      updateSegmentUI(activeSegmentId);
+                      renderSegments();
                       sendSaveEvent();
                   }
               }
@@ -1387,32 +1250,9 @@
     function updateData(id) {
       const seg = currentSegments.find(s => s.id === id);
       if (seg) {
-        pushState();
         seg.speaker = document.getElementById(`speaker-${id}`).value;
         seg.text = document.getElementById(`text-${id}`).value;
         sendSaveEvent();
-      }
-    }
-
-    function toggleCompleted(id) {
-      const seg = currentSegments.find(s => s.id == id);
-      if (seg) {
-          pushState();
-          const checkbox = document.getElementById(`completed-${id}`);
-          seg.completed = checkbox.checked;
-          sendSaveEvent();
-          
-          const el = document.getElementById(`seg-${id}`);
-          if (el) {
-              if (seg.completed) {
-                  el.classList.add('segment-completed');
-              } else {
-                  el.classList.remove('segment-completed');
-              }
-          }
-          
-          const ta = document.getElementById(`text-${id}`);
-          if (ta) ta.disabled = seg.completed;
       }
     }
 
@@ -1588,12 +1428,8 @@
         // If segments passed from python
         if (args.segments && Array.isArray(args.segments)) {
             currentSegments = args.segments;
-            if (initialSegments.length === 0 && currentSegments.length > 0) {
-                initialSegments = JSON.parse(JSON.stringify(currentSegments));
-            }
             if (audioReady) {
-               // Only call full render on initial stream load
-               rebuildUI(currentSegments);
+               renderSegments();
             }
         }
 
