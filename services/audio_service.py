@@ -321,9 +321,8 @@ def delete_audio(audio_id: str) -> bool:
         if not audio:
             return False
 
-        annotation_exists = db.query(Annotation).filter(Annotation.audio_id == audio_id).first()
-        if annotation_exists:
-            return False
+        # Delete related annotations first
+        db.query(Annotation).filter(Annotation.audio_id == audio_id).delete(synchronize_session=False)
 
         if os.path.exists(audio.file_path):
             os.remove(audio.file_path)
