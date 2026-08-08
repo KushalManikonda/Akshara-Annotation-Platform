@@ -28,6 +28,14 @@ st.set_page_config(
     layout="wide"
 )
 
+# -------------------------------------------------
+# Database Initialization
+# -------------------------------------------------
+# Automatically create DB schema and default admin user if they don't exist
+# This ensures cloud deployments work immediately without manual setup scripts
+from database.init_db import initialize_database
+initialize_database()
+
 
 # -------------------------------------------------
 # Cookie Injection (must run before rendering UI)
