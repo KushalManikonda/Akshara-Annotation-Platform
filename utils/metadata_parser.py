@@ -42,6 +42,36 @@ def parse_metadata_from_extraction(extracted_dir: str) -> Dict[str, Dict[str, An
     elif os.path.exists(json_path):
         metadata_map = _parse_json(json_path)
 
+    from pathlib import Path
+    for json_file in Path(extracted_dir).rglob("*.json"):
+        if json_file.name in ["metadata.json", "metadata.csv"]:
+            continue
+            
+        try:
+            with open(json_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                
+            if isinstance(data, list) or isinstance(data, dict):
+                base_name = json_file.stem
+                for ext in [".wav", ".mp3", ".flac", ".m4a"]:
+                    possible_audio = json_file.with_suffix(ext)
+                    if possible_audio.exists():
+                        rel_path = str(possible_audio.relative_to(Path(extracted_dir))).replace("\\", "/")
+                        metadata_map[rel_path] = {
+                            "original_transcript": json.dumps(data),
+                            "english_translation": None,
+                            "raw_metadata": "{}"
+                        }
+                        break
+                else:
+                    metadata_map[base_name] = {
+                        "original_transcript": json.dumps(data),
+                        "english_translation": None,
+                        "raw_metadata": "{}"
+                    }
+        except Exception:
+            pass
+
     return metadata_map
 
 
@@ -143,10 +173,18 @@ def _parse_csv(
             # relative path is the only reliable unique key.
             filename = raw_filename.replace("\\", "/")
 
+            extra_data = dict(row)
+            if fn_key in extra_data:
+                del extra_data[fn_key]
+            if tr_key and tr_key in extra_data:
+                del extra_data[tr_key]
+            if tran_key and tran_key in extra_data:
+                del extra_data[tran_key]
+            
             metadata_map[filename] = {
                 "original_transcript": row.get(tr_key) if tr_key else None,
                 "english_translation": row.get(tran_key) if tran_key else None,
-                "raw_metadata": json.dumps(row),
+                "raw_metadata": json.dumps(extra_data) if extra_data else "{}",
             }
 
     return metadata_map
@@ -158,6 +196,16 @@ def _parse_json(path: str) -> Dict[str, Dict[str, Any]]:
     with open(path, "r", encoding="utf-8") as f:
         try:
             data = json.load(f)
+            
+            if isinstance(data, list) and len(data) > 0 and not any(k in data[0] for k in ["filename", "audio_filename", "file"]):
+                base_name = os.path.splitext(os.path.basename(path))[0]
+                metadata_map[base_name] = {
+                    "original_transcript": json.dumps(data),
+                    "english_translation": None,
+                    "raw_metadata": "{}"
+                }
+                return metadata_map
+                
             if isinstance(data, list):
                 for item in data:
                     filename = (
@@ -169,8 +217,18 @@ def _parse_json(path: str) -> Dict[str, Dict[str, Any]]:
                         continue
                     metadata_map[filename.replace("\\", "/")] = _extract_json_item(item)
             elif isinstance(data, dict):
+                if data and not any(k in data for k in ["filename", "audio_filename", "file"]) and "start" in data:
+                     base_name = os.path.splitext(os.path.basename(path))[0]
+                     metadata_map[base_name] = {
+                         "original_transcript": json.dumps([data]),
+                         "english_translation": None,
+                         "raw_metadata": "{}"
+                     }
+                     return metadata_map
+                     
                 for filename, item in data.items():
-                    metadata_map[filename.replace("\\", "/")] = _extract_json_item(item)
+                    if isinstance(item, dict):
+                        metadata_map[filename.replace("\\", "/")] = _extract_json_item(item)
         except json.JSONDecodeError:
             pass
 
@@ -178,8 +236,13 @@ def _parse_json(path: str) -> Dict[str, Dict[str, Any]]:
 
 
 def _extract_json_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    extra_data = dict(item)
+    for k in ["filename", "audio_filename", "file", "transcript", "original_transcript", "translation", "english_translation"]:
+        if k in extra_data:
+            del extra_data[k]
+            
     return {
         "original_transcript": item.get("transcript") or item.get("original_transcript"),
         "english_translation": item.get("translation") or item.get("english_translation"),
-        "raw_metadata": json.dumps(item),
+        "raw_metadata": json.dumps(extra_data) if extra_data else "{}",
     }

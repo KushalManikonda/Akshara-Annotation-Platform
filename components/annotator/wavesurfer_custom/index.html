@@ -555,6 +555,7 @@
     let activeSegmentId = null;
     let audioReady = false;
     let playingRegionEnd = null; 
+    let isReadOnly = false;
     
     // Undo / Redo state
     let undoStack = [];
@@ -1102,8 +1103,8 @@
                 start: seg.start,
                 end: seg.end,
                 color: (activeSegmentId == seg.id) ? 'rgba(91, 70, 176, 0.6)' : 'rgba(91, 70, 176, 0.2)',
-                drag: true,
-                resize: true
+                drag: !isReadOnly,
+                resize: !isReadOnly
             });
         }
         
@@ -1173,8 +1174,8 @@
           end: seg.end,
           color: 'rgba(91, 70, 176, 0.2)',
           content: contentEl,
-          drag: true,
-          resize: true
+          drag: !isReadOnly,
+          resize: !isReadOnly
         });
 
         // Add to list
@@ -1187,26 +1188,26 @@
         item.innerHTML = `
           <div class="segment-header-bar">
             <div class="segment-id">${index + 1}</div>
-            <input type="text" class="time-input" id="start-${seg.id}" value="${formatTime(seg.start)}" onchange="updateTimestamp('${seg.id}', 'start')" title="Edit Start Time">
-            <select class="speaker-select" id="speaker-${seg.id}" onchange="updateData('${seg.id}')">
+            <input type="text" class="time-input" id="start-${seg.id}" value="${formatTime(seg.start)}" onchange="updateTimestamp('${seg.id}', 'start')" title="Edit Start Time" ${isReadOnly ? 'disabled' : ''}>
+            <select class="speaker-select" id="speaker-${seg.id}" onchange="updateData('${seg.id}')" ${isReadOnly ? 'disabled' : ''}>
               <option value="Speaker 0 (Female)" ${seg.speaker === 'Speaker 0 (Female)' ? 'selected' : ''}>Speaker 0 (Female)</option>
               <option value="Speaker 1 (Male)" ${seg.speaker === 'Speaker 1 (Male)' ? 'selected' : ''}>Speaker 1 (Male)</option>
               <option value="Speaker 2 (Female)" ${seg.speaker === 'Speaker 2 (Female)' ? 'selected' : ''}>Speaker 2 (Female)</option>
             </select>
-            <input type="text" class="time-input" id="end-${seg.id}" value="${formatTime(seg.end)}" onchange="updateTimestamp('${seg.id}', 'end')" title="Edit End Time">
-            <button class="action-btn" onclick="splitSegment('${seg.id}'); event.stopPropagation();" title="Split at Cursor"><i class="fas fa-cut"></i></button>
-            <button class="action-btn delete-btn" onclick="deleteSegment('${seg.id}'); event.stopPropagation();" title="Delete Segment"><i class="fas fa-trash"></i></button>
+            <input type="text" class="time-input" id="end-${seg.id}" value="${formatTime(seg.end)}" onchange="updateTimestamp('${seg.id}', 'end')" title="Edit End Time" ${isReadOnly ? 'disabled' : ''}>
+            ${isReadOnly ? '' : `<button class="action-btn" onclick="splitSegment('${seg.id}'); event.stopPropagation();" title="Split at Cursor"><i class="fas fa-cut"></i></button>
+            <button class="action-btn delete-btn" onclick="deleteSegment('${seg.id}'); event.stopPropagation();" title="Delete Segment"><i class="fas fa-trash"></i></button>`}
           </div>
           <div class="segment-body">
             <div class="segment-half">
               <div class="segment-half-title" style="display: flex; justify-content: space-between; align-items: center;">
                 <span>Editable ASR Transcript</span>
                 <label style="cursor: pointer; display: flex; align-items: center; gap: 4px; font-weight: normal; color: #555;">
-                  <input type="checkbox" id="completed-${seg.id}" ${seg.completed ? 'checked' : ''} onchange="toggleCompleted('${seg.id}')" onclick="event.stopPropagation()">
+                  <input type="checkbox" id="completed-${seg.id}" ${seg.completed ? 'checked' : ''} ${isReadOnly ? 'disabled' : ''} onchange="toggleCompleted('${seg.id}')" onclick="event.stopPropagation()">
                   Done
                 </label>
               </div>
-              <textarea class="text-area" id="text-${seg.id}" ${seg.completed ? 'disabled' : ''} onchange="updateData('${seg.id}')" oninput="updateNormalizedPreview('${seg.id}')" onclick="event.stopPropagation()">${seg.text}</textarea>
+              <textarea class="text-area" id="text-${seg.id}" ${(seg.completed || isReadOnly) ? 'disabled' : ''} onchange="updateData('${seg.id}')" oninput="updateNormalizedPreview('${seg.id}')" onclick="event.stopPropagation()">${seg.text}</textarea>
               <div id="error-${seg.id}" class="error-box"></div>
             </div>
             <div class="segment-half">
@@ -1578,6 +1579,14 @@
         
         if (args.task_id) {
             document.getElementById('taskTitle').innerText = "Task #" + args.task_id;
+        }
+        
+        if (args.is_read_only !== undefined) {
+            isReadOnly = args.is_read_only;
+            if (isReadOnly) {
+                const toolbar = document.querySelector('.toolbar');
+                if (toolbar) toolbar.style.display = 'none';
+            }
         }
 
         // Initialize once

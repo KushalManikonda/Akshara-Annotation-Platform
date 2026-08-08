@@ -51,7 +51,6 @@ def get_annotation(audio_id, annotator_id):
 
         if not annotation:
             audio = db.query(AudioFile).filter(AudioFile.id == audio_id).first()
-            
             annotation = Annotation(
                 audio_id=audio_id,
                 annotator_id=annotator_id,

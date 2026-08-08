@@ -42,6 +42,13 @@ def render(task, annotation, is_read_only=False):
         try:
             # If we store it as JSON string
             segments = json.loads(annotation.transcript)
+            for i, seg in enumerate(segments):
+                if 'id' not in seg:
+                    seg['id'] = i + 1
+                if 'speaker' not in seg:
+                    seg['speaker'] = "Speaker 0 (Female)"
+                if 'text' not in seg:
+                    seg['text'] = ""
         except:
             # Fallback if it's raw text
             segments = [{
@@ -57,6 +64,7 @@ def render(task, annotation, is_read_only=False):
         audio_url=audio_url,
         segments=segments,
         task_id=task.id,
+        is_read_only=is_read_only,
         key=f"ws_editor_{task.id}",
     )
 

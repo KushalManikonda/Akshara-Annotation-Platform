@@ -9,16 +9,30 @@ def render(task):
     st.subheader("📄 Context")
     
     with st.expander("Original Transcript", expanded=True):
-        st.write(task.original_transcript or "*(No original transcript available)*")
+        if task.original_transcript:
+            try:
+                parsed = json.loads(task.original_transcript)
+                st.write(json.dumps(parsed, ensure_ascii=False, indent=2))
+            except Exception:
+                st.write(task.original_transcript)
+        else:
+            st.write("*(No original transcript available)*")
         
     with st.expander("English Translation", expanded=True):
-        st.write(task.english_translation or "*(No english translation available)*")
+        if task.english_translation:
+            try:
+                parsed = json.loads(task.english_translation)
+                st.write(json.dumps(parsed, ensure_ascii=False, indent=2))
+            except Exception:
+                st.write(task.english_translation)
+        else:
+            st.write("*(No english translation available)*")
         
     if task.metadata_json:
         try:
             extra = json.loads(task.metadata_json)
             if extra:
                 with st.expander("Additional Metadata", expanded=False):
-                    st.json(extra)
+                    st.write(json.dumps(extra, ensure_ascii=False, indent=2))
         except Exception:
             pass

@@ -195,12 +195,21 @@ def upload_audio(uploaded_file, language: str, uploaded_by: str):
             size_mb = destination.stat().st_size / (1024 * 1024)
 
             # Full relative path from the real root, forward-slash normalised.
-            # e.g. audio/102104052/3CnBuRhqnO4/clip_0001.mp3
-            original_name = str(
-                extracted_file.relative_to(path_root)
-            ).replace("\\", "/")
-
-            meta = metadata_map.get(original_name, {})
+            original_name = str(extracted_file.relative_to(path_root)).replace("\\", "/")
+            meta = metadata_map.get(original_name)
+            
+            if not meta:
+                base_name = extracted_file.stem
+                meta = metadata_map.get(base_name)
+                
+            if not meta and len(metadata_map) == 1 and total_files == 0:
+                # If this is the very first file and there's only 1 metadata entry, we can guess it's for this file.
+                # Since we don't know total_files from the zip yet (we are iterating), we just check if it's the only one in the map
+                # and maybe we can just assign it if the map has 1 entry and we assume there's 1 audio file.
+                meta = list(metadata_map.values())[0]
+                
+            if not meta:
+                meta = {}
 
 
             audio = AudioFile(
@@ -321,8 +330,9 @@ def delete_audio(audio_id: str) -> bool:
         if not audio:
             return False
 
-        # Delete related annotations first
-        db.query(Annotation).filter(Annotation.audio_id == audio_id).delete(synchronize_session=False)
+        annotations = db.query(Annotation).filter(Annotation.audio_id == audio_id).all()
+        for ann in annotations:
+            db.delete(ann)
 
         if os.path.exists(audio.file_path):
             os.remove(audio.file_path)
@@ -458,10 +468,8 @@ def import_metadata_for_dataset(
     db = get_db()
 
     try:
-        suffix = Path(metadata_file.name).suffix.lower()
-
         with tempfile.TemporaryDirectory() as tmp_dir:
-            dest_path = os.path.join(tmp_dir, "metadata" + suffix)
+            dest_path = os.path.join(tmp_dir, metadata_file.name)
             metadata_file.seek(0)
             with open(dest_path, "wb") as f:
                 f.write(metadata_file.read())
@@ -486,6 +494,13 @@ def import_metadata_for_dataset(
 
         for audio in files:
             meta = metadata_map.get(audio.original_filename)
+            if not meta:
+                base_name = os.path.splitext(os.path.basename(audio.original_filename))[0]
+                meta = metadata_map.get(base_name)
+                
+            if not meta and len(metadata_map) == 1 and len(files) == 1:
+                meta = list(metadata_map.values())[0]
+                
             if meta:
                 audio.original_transcript = meta.get("original_transcript")
                 audio.english_translation = meta.get("english_translation")

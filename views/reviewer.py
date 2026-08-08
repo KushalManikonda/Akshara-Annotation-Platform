@@ -159,28 +159,11 @@ def show():
         )
 
     st.divider()
-    audio_player(task)
+    metadata_panel(task)
     st.divider()
 
-    left, right = st.columns([3, 2])
-
-    with left:
-        metadata_panel(task)
-        st.divider()
-
-        st.subheader("Annotator's Verbatim RSML")
-        st.text_area(
-            "RSML",
-            value=annotation.transcript or "",
-            height=300,
-            disabled=True,
-            label_visibility="collapsed",
-        )
-
-    result = process_transcript(annotation.transcript or "")
-
-    with right:
-        normalized_view(result["ast"])
+    from components.annotator.wavesurfer_editor import render as wavesurfer_editor
+    wavesurfer_editor(task, annotation, is_read_only=True)
 
     st.divider()
 
